@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 from aiogram.exceptions import TelegramRetryAfter
 import logging
+import random
 
 load_dotenv()
 
@@ -22,27 +23,30 @@ QUEUE_NAME = 'priority_queue'
 
 workers = 5  
 
-class TelegramSender:
-    def __init__(self, token):
-        self.bot = Bot(token)
-
+class MessageSender:
+    def __init__(self, bot, mock=False):
+        self.bot = bot
+        self.mock = mock 
     async def send_message(self, chat_id, message_text):
         while True:
             try:
-                await self.bot.send_message(chat_id, message_text)
-                await asyncio.sleep(RATE_LIMIT)  
-                break 
+                if self.mock:
+                    logger.info(f"Mock send: {message_text} to chat {chat_id}")
+                    await asyncio.sleep(random.uniform(0.1, 0.5)) 
+                else:
+                    await self.bot.send_message(chat_id, message_text)
+                await asyncio.sleep(RATE_LIMIT) 
+                break  
             except TelegramRetryAfter as e:
-                retry_seconds = getattr(e, "retry_after", 5) 
+                retry_seconds = getattr(e, "retry_after", 5)
                 logger.warning(f"Flood control: retry in {retry_seconds} секунд...")
                 await asyncio.sleep(retry_seconds)
             except Exception as e:
-                logger.error(f"error sending msg: {e}")
+                logger.error(f"error: {e}")
                 break
 
-async def send_message_worker(sender: TelegramSender, chat_id, message_text):
+async def send_message_worker(sender: MessageSender, chat_id, message_text):
     await sender.send_message(chat_id, message_text)
-
 
 async def create_queue():
     connection = await aio_pika.connect_robust(RABBITMQ_HOST)
@@ -51,7 +55,6 @@ async def create_queue():
         QUEUE_NAME, durable=True, arguments={'x-max-priority': 10}
     )
     return queue, connection
-
 
 async def send_to_queue(message_text: str, chat_id: int, priority: int):
     connection = await aio_pika.connect_robust(RABBITMQ_HOST)
@@ -64,7 +67,6 @@ async def send_to_queue(message_text: str, chat_id: int, priority: int):
     )
     await connection.close()
 
-
 async def process_queue(queue, sender):
     async def message_handler(message: aio_pika.IncomingMessage):
         async with message.process():
@@ -74,26 +76,27 @@ async def process_queue(queue, sender):
                 chat_id = int(message_data[1])
                 await send_message_worker(sender, chat_id, message_text)
             except Exception as e:
-                logger.error(f"Error: {e}")
-
+                logger.error(f"error: {e}")
     await queue.consume(message_handler)
-
 
 @dp.message(Command('send'))
 async def handle_send(message: Message):
     for i in range(100):
         await send_to_queue(f"Test message {i + 1}", message.chat.id, priority=5)
-    await message.answer("messages're in queue and sending")
-
+    await message.answer("messages're in queue")
 
 async def main():
     queue, connection = await create_queue()
-    senders = [TelegramSender(TOKEN) for _ in range(workers)]
+    senders = [MessageSender(bot, mock=False) for _ in range(2)] 
+
     tasks = []
     for sender in senders:
         tasks.append(process_queue(queue, sender))
-    await asyncio.gather(*tasks, dp.start_polling(bot))
-
+    await asyncio.gather(
+        dp.start_polling(bot),
+        *[asyncio.sleep(1/30) for _ in range(90)], 
+        *tasks,
+    )
 
 if __name__ == '__main__':
     asyncio.run(main())
