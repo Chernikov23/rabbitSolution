@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send Message</title>
+</head>
+<body>
+    <h1>Send a message to users</h1>
+    <form action="/send" method="post">
+        <label for="chat_id">Chat ID:</label>
+        <input type="number" id="chat_id" name="chat_id" required><br><br>
+        
+        <label for="message_text">Message Text:</label>
+        <textarea id="message_text" name="message_text" required></textarea><br><br>
+        
+        <label for="num_messages">Number of Messages:</label>
+        <input type="number" id="num_messages" name="num_messages" value="1" min="1" required><br><br>
+        
+        <button type="submit">Send</button>
+    </form>
+</body>
+</html>
